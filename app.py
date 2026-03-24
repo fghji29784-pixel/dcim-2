@@ -270,6 +270,39 @@ with tab_nyquist:
         )
         st.pyplot(fig)
 
+        # ── EIS vs DCIM comparison ────────────────────────────────────────
+        if st.session_state.df_eis is not None:
+            import pandas as pd
+            df_eis = st.session_state.df_eis
+            result = st.session_state.fit_result
+
+            rs_eis = float(df_eis["re_z"].min()) * 1000       # high-freq intercept [mΩ]
+            rs_dcim = result.Rs * 1000
+
+            # EIS arc peak: frequency where -Im(Z) is maximum → R_arc ≈ Re(Z_peak) - Rs
+            idx_peak = df_eis["neg_im_z"].idxmax()
+            re_at_peak_eis = float(df_eis.loc[idx_peak, "re_z"]) * 1000
+            r_arc_eis = re_at_peak_eis - rs_eis               # R1+R2 from EIS arc width
+            r_arc_dcim = (result.R1 + result.R2) * 1000
+
+            st.subheader("EIS vs DCIM Comparison")
+            cmp_df = pd.DataFrame({
+                "Parameter": ["Rs (Ω resistance)", "R1+R2 (arc width, approx)"],
+                "EIS [mΩ]":  [f"{rs_eis:.3f}", f"{r_arc_eis:.3f}"],
+                "DCIM [mΩ]": [f"{rs_dcim:.3f}", f"{r_arc_dcim:.3f}"],
+                "Diff [mΩ]": [
+                    f"{rs_dcim - rs_eis:+.3f}",
+                    f"{r_arc_dcim - r_arc_eis:+.3f}",
+                ],
+            })
+            st.dataframe(cmp_df, use_container_width=True, hide_index=True)
+            st.caption(
+                "EIS Rs = high-frequency Re(Z) intercept (minimum Re(Z)). "
+                "EIS arc width = Re(Z) at -Im(Z) peak − Rs. "
+                "These are geometric estimates; for precise EIS fitting, "
+                "use dedicated EIS analysis software."
+            )
+
         with st.expander("View Nyquist data table"):
             import pandas as pd
             nyq_df = pd.DataFrame({

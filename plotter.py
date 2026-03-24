@@ -178,7 +178,20 @@ def plot_nyquist(
                      (measured EIS overlay)
     result         : optional FitResult for annotating Rs, peak frequencies
     """
-    fig, ax = plt.subplots(figsize=(8, 6))
+    # Compute data range to set a square figure with appropriate size
+    all_re = list(re_z * 1000)
+    all_im = list(neg_im_z * 1000)
+    if eis_df is not None and len(eis_df) > 0:
+        all_re += list(eis_df["re_z"] * 1000)
+        all_im += list(eis_df["neg_im_z"] * 1000)
+    data_span = max(
+        max(all_re) - min(all_re),
+        max(all_im) - min(all_im),
+        1e-9,
+    )
+    # Scale figure so one unit on screen is the same in x and y
+    fig_size = min(max(6.0, data_span * 0.6), 10.0)
+    fig, ax = plt.subplots(figsize=(fig_size, fig_size))
 
     # DCIM model curve
     ax.plot(re_z * 1000, neg_im_z * 1000,
@@ -193,27 +206,42 @@ def plot_nyquist(
             label="EIS measured", marker="o",
         )
 
-    # Annotate Rs on x-axis
+    # Annotate Rs (DCIM) on x-axis
     if result is not None:
         rs_mohm = result.Rs * 1000
         ax.axvline(rs_mohm, color="gray", linestyle=":", linewidth=0.8, alpha=0.6)
         ax.annotate(
-            f"Rs={rs_mohm:.2f} mΩ",
+            f"Rs(DCIM)={rs_mohm:.2f} mΩ",
             xy=(rs_mohm, 0),
-            xytext=(rs_mohm + 0.3, ax.get_ylim()[1] * 0.05 if ax.get_ylim()[1] != 0 else 0.1),
+            xytext=(rs_mohm + data_span * 0.03,
+                    data_span * 0.05),
             fontsize=7,
             color="gray",
             arrowprops=dict(arrowstyle="->", color="gray", lw=0.6),
         )
 
+    # Annotate Rs (EIS) — high-frequency real-axis intercept
+    if eis_df is not None and len(eis_df) > 0:
+        rs_eis_mohm = float(eis_df["re_z"].min()) * 1000
+        ax.axvline(rs_eis_mohm, color="#F44336", linestyle=":", linewidth=0.8, alpha=0.6)
+        ax.annotate(
+            f"Rs(EIS)={rs_eis_mohm:.2f} mΩ",
+            xy=(rs_eis_mohm, 0),
+            xytext=(rs_eis_mohm + data_span * 0.03,
+                    data_span * 0.12),
+            fontsize=7,
+            color="#F44336",
+            arrowprops=dict(arrowstyle="->", color="#F44336", lw=0.6),
+        )
+
     ax.set_xlabel("Re(Z) (mΩ)", fontsize=10)
     ax.set_ylabel("-Im(Z) (mΩ)", fontsize=10)
-    ax.set_aspect("equal", adjustable="box")
+    ax.set_aspect("equal", adjustable="datalim")
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=9)
     ax.set_title("Nyquist Plot — DCIM Reconstruction", fontsize=11, fontweight="bold")
 
-    # Ensure y-axis starts at or below 0 (capacitive arcs are in positive quadrant)
+    # Ensure y-axis starts at or below 0
     ymin, ymax = ax.get_ylim()
     if ymin > 0:
         ax.set_ylim(bottom=-0.02 * ymax)
