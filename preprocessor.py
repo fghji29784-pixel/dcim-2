@@ -143,11 +143,10 @@ def prepare_fit_data(
 ) -> tuple[np.ndarray, np.ndarray, float, float]:
     """Extract and prepare the voltage transient window for curve fitting.
 
-    Fixes applied
-    -------------
-    Bug 2 : t is offset so that t[0] == 0 at p2 (NOT stored as absolute time)
-    Bug 3 : window length = int(window_s / dt) samples, where dt is
-            auto-detected from data — NOT a hard-coded 1000-sample limit
+    Uses time-based window selection (not sample-count-based) so that
+    mixed-sampling-rate files (DCIM burst at 192 µs + normal CC data at
+    0.1–1 s) are handled correctly.  dt is estimated from the local
+    neighbourhood of p2, not the whole-file median, for the same reason.
 
     Parameters
     ----------
@@ -161,30 +160,21 @@ def prepare_fit_data(
     t_fit   : time array [s], starts at 0 (p2 = t=0)
     V_fit   : voltage array [V], same length as t_fit
     Vp2     : voltage at p2 [V]
-    dt      : detected (or provided) sampling interval [s]
+    dt      : local sampling interval around p2 [s]
     """
     time_all = df["time_s"].values
     volt_all = df["voltage_V"].values
 
-    # ── Auto-detect dt ────────────────────────────────────────────────────
-    if dt is None:
-        diffs = np.diff(time_all)
-        dt = float(np.median(diffs))
-        if dt <= 0:
-            raise ValueError(
-                f"Auto-detected dt = {dt:.6g} s is non-positive. "
-                "Check that the time column is in seconds and monotonically increasing."
-            )
-
-    # ── Window size (Bug 3 fix: dt-based, not hard-coded) ─────────────────
-    n_samples = max(2, int(round(window_s / dt)))
-
     # ── Row-position of p2 ────────────────────────────────────────────────
-    # df may have non-contiguous index after dropna; use positional indexing
     pos_p2 = df.index.get_loc(idx_p2)
+    t_p2_abs = float(time_all[pos_p2])
 
-    # Clamp window to available data
-    pos_end = min(pos_p2 + n_samples, len(df))
+    # ── Time-based window selection ───────────────────────────────────────
+    # Works correctly regardless of sampling rate changes in the file.
+    t_end = t_p2_abs + window_s
+    pos_end = int(np.searchsorted(time_all, t_end, side="right"))
+    pos_end = min(pos_end, len(df))
+
     if pos_end <= pos_p2:
         raise ValueError(
             "p2 is at or beyond the end of the data. "
@@ -194,11 +184,30 @@ def prepare_fit_data(
     t_window = time_all[pos_p2:pos_end]
     V_window = volt_all[pos_p2:pos_end]
 
-    Vp2 = float(V_window[0])
-    t_p2 = float(t_window[0])
+    # ── Local dt around p2 ────────────────────────────────────────────────
+    # Using the local neighbourhood avoids the median being skewed by
+    # the slow-sampled portions of a mixed-rate file.
+    if dt is None:
+        lo = max(0, pos_p2 - 5)
+        hi = min(len(df), pos_p2 + 6)
+        local_diffs = np.diff(time_all[lo:hi])
+        positive_diffs = local_diffs[local_diffs > 0]
+        if len(positive_diffs) > 0:
+            dt = float(np.median(positive_diffs))
+        else:
+            all_diffs = np.diff(time_all)
+            positive_all = all_diffs[all_diffs > 0]
+            dt = float(np.median(positive_all)) if len(positive_all) > 0 else 1.0
+        if dt <= 0:
+            raise ValueError(
+                f"Auto-detected dt = {dt:.6g} s is non-positive. "
+                "Check that the time column is in seconds and monotonically increasing."
+            )
 
-    # ── t offset (Bug 2 fix: 0-based from p2) ─────────────────────────────
-    t_fit = t_window - t_p2   # t_fit[0] == 0.0
+    Vp2 = float(V_window[0])
+
+    # ── t offset: 0-based from p2 ─────────────────────────────────────────
+    t_fit = t_window - t_p2_abs   # t_fit[0] == 0.0
 
     return t_fit, V_window.copy(), Vp2, dt
 
